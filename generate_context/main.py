@@ -106,6 +106,9 @@ def extract_function_defs_and_docstrings(file_content):
 def build_tree_structure(base_path, patterns):
     """Build a tree structure of the repository."""
     tree = {}
+    base_path_name = Path(base_path).name  # Get the repository root name
+    tree[base_path_name] = {}  # Initialize the root of the tree
+
     for root, dirs, files in os.walk(base_path):
         # Ignore directories starting with '.'
         dirs[:] = [d for d in dirs if not d.startswith(".")]
@@ -116,7 +119,7 @@ def build_tree_structure(base_path, patterns):
                 continue
             # Build the path in the tree
             relative_path = file_path.relative_to(base_path)
-            parts = relative_path.parts
+            parts = [base_path_name] + list(relative_path.parts)
             current = tree
             for part in parts[:-1]:
                 current = current.setdefault(part, {})
@@ -128,13 +131,15 @@ def format_tree(tree, indent=0):
     """Format the tree structure as a string."""
     lines = []
     for key, value in tree.items():
-        lines.append("    " * indent + str(key))
         if isinstance(value, dict):
+            lines.append("│   " * indent + "├── " + str(key) + "/")
             lines.extend(format_tree(value, indent + 1))
+        else:
+            lines.append("│   " * indent + "├── " + str(key))
     return lines
 
 
-def dump_repository_structure_and_files(base_path):
+def dump_repository_structure_and_files(base_path, no_nest):
     """Dump the repository structure and file contents to an output string, and count tokens."""
     patterns = load_gitignore_patterns(base_path)
     main_gitignore_found = False
@@ -177,6 +182,9 @@ def dump_repository_structure_and_files(base_path):
             in_related_repo = any(
                 file_path.is_relative_to(repo_root) for repo_root in related_repo_roots
             )
+            if no_nest and in_related_repo:
+                continue
+
             if in_related_repo and file_path.suffix not in [".md", ".py"]:
                 continue
 
@@ -221,12 +229,17 @@ def main():
         nargs="?",
         help="The output file for the context (default: {base_path}/context.txt)",
     )
+    parser.add_argument(
+        "--no-nest",
+        action="store_true",
+        help="Ignore all related repo files when building the context",
+    )
     args = parser.parse_args()
 
     base_path = Path(args.base_path).resolve()
     output_file = args.output_file or base_path / "context.txt"
 
-    context = dump_repository_structure_and_files(base_path)
+    context = dump_repository_structure_and_files(base_path, args.no_nest)
 
     # Write to the output file
     with open(output_file, "w") as out_file:
