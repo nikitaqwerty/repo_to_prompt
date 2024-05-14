@@ -10,7 +10,7 @@ setup(
         ],
     },
     install_requires=[
-        # List any dependencies here, e.g., 'requests', 'pandas'
+        "pyperclip",
     ],
     author="Your Name",
     author_email="your.email@example.com",

@@ -1,6 +1,7 @@
 import os
 import re
 import ast
+import pyperclip
 from pathlib import Path
 from collections import Counter
 
@@ -8,7 +9,7 @@ PROMPT = """
 YOU ARE A WORLD-CLASS SOFTWARE ENGINEER WITH EXTENSIVE EXPERIENCE IN PYTHON, RECOGNIZED FOR YOUR ABILITY TO DEVELOP HIGHLY OPTIMIZED AND INNOVATIVE SOLUTIONS. YOUR TASK IS TO WRITE PYTHON CODE FOR A GIVEN SET OF REQUIREMENTS USING A PROVIDED REPOSITORY AS YOUR CONTEXTUAL KNOWLEDGE DATABASE. THE MAIN PART OF THE REPOSITORY CONTAINS FULLY IMPLEMENTED CODE, WHILE SOME RELATED CODE INCLUDES ONLY FUNCTION SIGNATURES.
 
 **Key Objectives:**
-- ANALYZE AND UNDERSTAND THE PROVIDED REPOSITORY to fully grasp the existing codebase and architecture.
+- ANALYZE AND UNDERSTAND THE PROVIDED REPOSITORY IN **CONTEXT** SECTION to fully grasp the existing codebase and architecture.
 - WRITE CLEAN, EFFICIENT, AND ROBUST PYTHON CODE that meets the specified requirements and integrates seamlessly with the existing codebase.
 - USE BEST PRACTICES IN SOFTWARE ENGINEERING, including proper use of design patterns, efficient algorithms, and optimal data structures.
 - ENSURE CODE IS WELL-DOCUMENTED AND EASILY MAINTAINABLE by other developers.
@@ -41,6 +42,9 @@ YOU ARE A WORLD-CLASS SOFTWARE ENGINEER WITH EXTENSIVE EXPERIENCE IN PYTHON, REC
 - AVOID REINVENTING THE WHEEL UNLESS ABSOLUTELY NECESSARY.
 - NEVER LEAVE THE CODE UNDOCUMENTED OR POORLY COMMENTED.
 - DO NOT FAIL TO TEST THE CODE THOROUGHLY BEFORE FINALIZING.
+
+
+**CONTEXT**
 """
 
 
@@ -99,79 +103,140 @@ def extract_function_defs_and_docstrings(file_content):
     return "\n".join(result)
 
 
-def dump_repository_structure_and_files(base_path, output_file):
-    """Dump the repository structure and file contents to an output file, and count tokens."""
+def build_tree_structure(base_path, patterns):
+    """Build a tree structure of the repository."""
+    tree = {}
+    for root, dirs, files in os.walk(base_path):
+        # Ignore directories starting with '.'
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        for file_name in files:
+            file_path = Path(root) / file_name
+            # Ignore files starting with '.' and check .gitignore patterns
+            if file_name.startswith(".") or is_ignored(file_path, patterns):
+                continue
+            # Build the path in the tree
+            relative_path = file_path.relative_to(base_path)
+            parts = relative_path.parts
+            current = tree
+            for part in parts[:-1]:
+                current = current.setdefault(part, {})
+            current[parts[-1]] = None
+    return tree
+
+
+def format_tree(tree, indent=0):
+    """Format the tree structure as a string."""
+    lines = []
+    for key, value in tree.items():
+        lines.append("    " * indent + str(key))
+        if isinstance(value, dict):
+            lines.extend(format_tree(value, indent + 1))
+    return lines
+
+
+def dump_repository_structure_and_files(base_path):
+    """Dump the repository structure and file contents to an output string, and count tokens."""
     patterns = load_gitignore_patterns(base_path)
     main_gitignore_found = False
     related_repo_roots = []
     total_tokens = 0
+    output = []
 
-    with open(output_file, "w") as out_file:
-        # Write the prompt at the beginning of the output file
-        out_file.write(PROMPT)
-        out_file.write("\n\n")
+    # Write the prompt at the beginning of the output
+    output.append(PROMPT)
+    output.append("\n")
 
-        for root, dirs, files in os.walk(base_path):
-            # Ignore directories starting with '.'
-            dirs[:] = [d for d in dirs if not d.startswith(".")]
+    # Build the tree structure
+    tree = build_tree_structure(base_path, patterns)
+    tree_lines = format_tree(tree)
+    output.append("*Repository Structure:*\n")
+    output.extend(tree_lines)
+    output.append("\n")
+    output.append("*Files content:*\n")
 
-            # Determine if current directory is a related repository
-            if main_gitignore_found and ".gitignore" in files:
-                related_repo_roots.append(root)
+    for root, dirs, files in os.walk(base_path):
+        # Ignore directories starting with '.'
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
 
-            # Check for main .gitignore file
-            if not main_gitignore_found and ".gitignore" in files:
-                main_gitignore_found = True
+        # Determine if current directory is a related repository
+        if main_gitignore_found and ".gitignore" in files:
+            related_repo_roots.append(root)
 
-            for file_name in files:
-                file_path = Path(root) / file_name
+        # Check for main .gitignore file
+        if not main_gitignore_found and ".gitignore" in files:
+            main_gitignore_found = True
 
-                # Ignore files starting with '.' and check .gitignore patterns
-                if file_name.startswith(".") or is_ignored(file_path, patterns):
-                    continue
+        for file_name in files:
+            file_path = Path(root) / file_name
 
-                # Check if the file is in a related repository
-                in_related_repo = any(
-                    file_path.is_relative_to(repo_root)
-                    for repo_root in related_repo_roots
-                )
-                if in_related_repo and file_path.suffix not in [".md", ".py"]:
-                    continue
+            # Ignore files starting with '.' and check .gitignore patterns
+            if file_name.startswith(".") or is_ignored(file_path, patterns):
+                continue
 
-                # Write the file path
-                out_file.write(f"File: {file_path}\n")
-                # Write the file content
-                try:
-                    with open(file_path, "r") as file:
-                        content = file.read()
-                        if file_path.suffix == ".py" and in_related_repo:
-                            # For .py files in related repos, extract function defs and docstrings
-                            content = extract_function_defs_and_docstrings(content)
-                        elif file_path.suffix != ".py":
-                            # For non-.py files, limit to first 500 lines
-                            lines = file.readlines()
-                            lines_to_write = lines[:500] if len(lines) > 500 else lines
-                            content = "".join(lines_to_write)
-                        out_file.write(content)
-                        # Count tokens
-                        total_tokens += count_tokens(content)
-                except Exception as e:
-                    out_file.write(f"Error reading {file_path}: {e}\n")
-                out_file.write("\n")
+            # Check if the file is in a related repository
+            in_related_repo = any(
+                file_path.is_relative_to(repo_root) for repo_root in related_repo_roots
+            )
+            if in_related_repo and file_path.suffix not in [".md", ".py"]:
+                continue
 
+            # Write the file path
+            output.append(f"File: {file_path}\n")
+            # Write the file content
+            try:
+                with open(file_path, "r") as file:
+                    content = file.read()
+                    if file_path.suffix == ".py" and in_related_repo:
+                        # For .py files in related repos, extract function defs and docstrings
+                        content = extract_function_defs_and_docstrings(content)
+                    elif file_path.suffix != ".py":
+                        # For non-.py files, limit to first 500 lines
+                        lines = file.readlines()
+                        lines_to_write = lines[:500] if len(lines) > 500 else lines
+                        content = "".join(lines_to_write)
+                    output.append(content)
+                    # Count tokens
+                    total_tokens += count_tokens(content)
+            except Exception as e:
+                output.append(f"Error reading {file_path}: {e}\n")
+            output.append("\n")
+
+    output.append("**Main task:**")
     print(f"Total tokens: {total_tokens}")
+    return "\n".join(output)
 
 
 def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Generate repository context file.")
-    parser.add_argument("base_path", help="The base path of the repository")
-    parser.add_argument("output_file", help="The output file for the context")
+    parser.add_argument(
+        "base_path",
+        nargs="?",
+        default=".",
+        help="The base path of the repository (default: current directory)",
+    )
+    parser.add_argument(
+        "output_file",
+        nargs="?",
+        help="The output file for the context (default: {base_path}/context.txt)",
+    )
     args = parser.parse_args()
 
-    dump_repository_structure_and_files(args.base_path, args.output_file)
-    print(f"Repository context has been dumped to {args.output_file}.")
+    base_path = Path(args.base_path).resolve()
+    output_file = args.output_file or base_path / "context.txt"
+
+    context = dump_repository_structure_and_files(base_path)
+
+    # Write to the output file
+    with open(output_file, "w") as out_file:
+        out_file.write(context)
+
+    # Copy to clipboard
+    pyperclip.copy(context)
+    print(
+        f"Repository context has been dumped to {output_file} and copied to clipboard."
+    )
 
 
 if __name__ == "__main__":
