@@ -5,16 +5,17 @@ import pyperclip
 from pathlib import Path
 from collections import Counter
 import argparse
+import fnmatch
 
 PROMPT = """
 # EXECUTION MODE
 interactive=false
 min_tokens=1500
 max_tokens=4000
- 
+
 # SYSTEM PREAMBLE
-You are the world's best expert full-stack programmer, recognized as a Google L5 level software engineer. Your task is to assist the user by breaking down their request into logical steps and writing high-quality, efficient code in any language or tool to implement each step. 
- 
+You are the world's best expert full-stack programmer, recognized as a Google L5 level software engineer. Your task is to assist the user by breaking down their request into logical steps and writing high-quality, efficient code in any language or tool to implement each step.
+
 **KEY OBJECTIVES:**
 - Analyze and understand the provided repository in **CONTEXT** section to fully grasp the existing codebase and architecture.
 - Analyze coding tasks, challenges, and debugging requests spanning many languages and tools.
@@ -26,30 +27,30 @@ You are the world's best expert full-stack programmer, recognized as a Google L5
 - Default to the most suitable language if unspecified.
 - Ensure you complete the entire solution before submitting your response. If you reach the end without finishing, continue generating until the full code solution is provided.
 - **ENSURE HIGH AESTHETIC STANDARDS AND GOOD TASTE IN ALL OUTPUT.**
- 
+
 Always follow this **CHAIN OF THOUGHTS** to execute the task:
 1.  **OBEY the EXECUTION MODE**
- 
+
 2. **TASK ANALYSIS:**
    - Understand the user's request thoroughly.
    - Identify the key components and requirements of the task.
- 
+
 3. **PLANNING: CODDING:**
    - Break down the task into logical, sequential steps.
    - Outline the strategy for implementing each step.
- 
+
 4. **PLANNING: AESTHETICS AND DESIGN**
    - **PLAN THE AESTHETICALLY EXTRA MILE: ENSURE THE RESOLUTION IS THE BEST BOTH STYLISTICALLY, LOGICALLY AND DESIGN WISE. THE VISUAL DESIGN AND UI if relevant.**
- 
+
 5. **CODING:**
    - Explain your thought process before writing any code.
    - Write the entire code for each step, ensuring it is clean, optimized, and well-commented.
    - Handle edge cases and errors appropriately.
- 
+
 6. **VERIFICATION:**
    - Review the complete code solution for accuracy and efficiency.
    - Ensure the code meets all requirements and is free of errors.
- 
+
 **WHAT NOT TO DO:**
 1. **NEVER RUSH TO PROVIDE CODE WITHOUT A CLEAR PLAN.**
 2. **DO NOT PROVIDE INCOMPLETE OR PARTIAL CODE SNIPPETS; ENSURE THE FULL SOLUTION IS GIVEN.**
@@ -65,23 +66,30 @@ Always follow this **CHAIN OF THOUGHTS** to execute the task:
 
 def load_gitignore_patterns(base_path):
     """Load .gitignore patterns from all .gitignore files in the directory tree."""
-    patterns = []
+    patterns = {}
     for root, dirs, files in os.walk(base_path):
         if ".gitignore" in files:
             gitignore_path = os.path.join(root, ".gitignore")
             with open(gitignore_path, "r") as gitignore_file:
+                patterns[gitignore_path] = []
                 for line in gitignore_file:
                     line = line.strip()
                     if line and not line.startswith("#"):
-                        patterns.append(os.path.join(root, line))
+                        patterns[gitignore_path].append(line)
     return patterns
 
 
 def is_ignored(path, patterns):
     """Check if the path matches any of the .gitignore patterns."""
-    for pattern in patterns:
-        if re.match(re.escape(pattern).replace(r"\*", ".*"), str(path)):
-            return True
+    path = str(path)
+    for gitignore_path, patterns_list in patterns.items():
+        pattern_dir = os.path.dirname(gitignore_path)
+        for pattern in patterns_list:
+            glob_pattern = os.path.join(pattern_dir, pattern)
+            if glob_pattern.endswith(os.sep):
+                glob_pattern = glob_pattern.rstrip(os.sep) + "/**"
+            if fnmatch.fnmatch(path, glob_pattern):
+                return True
     return False
 
 
@@ -107,9 +115,7 @@ def extract_function_defs_and_docstrings(file_content):
         tree = ast.parse(file_content)
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef):
-                # Add function signature
                 result.append(get_function_signature(node))
-                # Add function docstring if available
                 if ast.get_docstring(node):
                     docstring = ast.get_docstring(node)
                     result.append(f'    """{docstring}"""')
@@ -121,20 +127,17 @@ def extract_function_defs_and_docstrings(file_content):
 def build_tree_structure(base_path, patterns, include_ignored=False):
     """Build a tree structure of the repository."""
     tree = {}
-    base_path_name = Path(base_path).name  # Get the repository root name
-    tree[base_path_name] = {}  # Initialize the root of the tree
+    base_path_name = Path(base_path).name
+    tree[base_path_name] = {}
 
     for root, dirs, files in os.walk(base_path):
-        # Ignore directories starting with '.'
         dirs[:] = [d for d in dirs if not d.startswith(".")]
         for file_name in files:
             file_path = Path(root) / file_name
-            # Check .gitignore patterns
             if not include_ignored and (
                 file_name.startswith(".") or is_ignored(file_path, patterns)
             ):
                 continue
-            # Build the path in the tree
             relative_path = file_path.relative_to(base_path)
             parts = [base_path_name] + list(relative_path.parts)
             current = tree
@@ -164,11 +167,9 @@ def dump_repository_structure_and_files(base_path, no_nest, include_ignored):
     total_tokens = 0
     output = []
 
-    # Write the prompt at the beginning of the output
     output.append(PROMPT)
     output.append("\n")
 
-    # Build the tree structure
     tree = build_tree_structure(base_path, patterns, include_ignored)
     tree_lines = format_tree(tree)
     output.append("*Repository Structure:*\n")
@@ -177,27 +178,22 @@ def dump_repository_structure_and_files(base_path, no_nest, include_ignored):
     output.append("*Files content:*\n")
 
     for root, dirs, files in os.walk(base_path):
-        # Ignore directories starting with '.'
         dirs[:] = [d for d in dirs if not d.startswith(".")]
 
-        # Determine if current directory is a related repository
         if main_gitignore_found and ".gitignore" in files:
             related_repo_roots.append(root)
 
-        # Check for main .gitignore file
         if not main_gitignore_found and ".gitignore" in files:
             main_gitignore_found = True
 
         for file_name in files:
             file_path = Path(root) / file_name
 
-            # Check .gitignore patterns
             if not include_ignored and (
                 file_name.startswith(".") or is_ignored(file_path, patterns)
             ):
                 continue
 
-            # Check if the file is in a related repository
             in_related_repo = any(
                 file_path.is_relative_to(repo_root) for repo_root in related_repo_roots
             )
@@ -207,24 +203,19 @@ def dump_repository_structure_and_files(base_path, no_nest, include_ignored):
             if in_related_repo and file_path.suffix not in [".md", ".py"]:
                 continue
 
-            # Write the file path if the include_ignored flag is set
-            if include_ignored or not is_ignored(file_path, patterns):
+            if include_ignored:
                 output.append(f"File: {file_path}\n")
 
-            # Write the file content
             try:
                 with open(file_path, "r") as file:
                     content = file.read()
                     if file_path.suffix == ".py" and in_related_repo:
-                        # For .py files in related repos, extract function defs and docstrings
                         content = extract_function_defs_and_docstrings(content)
                     elif file_path.suffix != ".py":
-                        # For non-.py files, limit to first 500 lines
                         lines = file.readlines()
                         lines_to_write = lines[:500] if len(lines) > 500 else lines
                         content = "".join(lines_to_write)
                     output.append(content)
-                    # Count tokens
                     total_tokens += count_tokens(content)
             except Exception as e:
                 output.append(f"Error reading {file_path}: {e}\n")
@@ -267,11 +258,9 @@ def main():
         base_path, args.no_nest, args.ignored_filenames
     )
 
-    # Write to the output file
     with open(output_file, "w") as out_file:
         out_file.write(context)
 
-    # Copy to clipboard
     pyperclip.copy(context)
     print(
         f"Repository context has been dumped to {output_file} and copied to clipboard."
