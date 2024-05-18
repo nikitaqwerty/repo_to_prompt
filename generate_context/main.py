@@ -177,6 +177,8 @@ def dump_repository_structure_and_files(base_path, no_nest, include_ignored):
     output.append("\n")
     output.append("*Files content:*\n")
 
+    file_contents = {}
+
     for root, dirs, files in os.walk(base_path):
         dirs[:] = [d for d in dirs if not d.startswith(".")]
 
@@ -203,9 +205,6 @@ def dump_repository_structure_and_files(base_path, no_nest, include_ignored):
             if in_related_repo and file_path.suffix not in [".md", ".py"]:
                 continue
 
-            if include_ignored:
-                output.append(f"File: {file_path}\n")
-
             try:
                 with open(file_path, "r") as file:
                     content = file.read()
@@ -215,11 +214,15 @@ def dump_repository_structure_and_files(base_path, no_nest, include_ignored):
                         lines = file.readlines()
                         lines_to_write = lines[:500] if len(lines) > 500 else lines
                         content = "".join(lines_to_write)
-                    output.append(content)
-                    total_tokens += count_tokens(content)
+                    file_contents[file_path] = content
             except Exception as e:
-                output.append(f"Error reading {file_path}: {e}\n")
-            output.append("\n")
+                file_contents[file_path] = f"Error reading {file_path}: {e}"
+
+    for file_path, content in file_contents.items():
+        output.append(f"File: {file_path}\n")
+        output.append(content)
+        total_tokens += count_tokens(content)
+        output.append("\n")
 
     output.append("**Main task:**")
     print(f"Total tokens: {total_tokens}")
