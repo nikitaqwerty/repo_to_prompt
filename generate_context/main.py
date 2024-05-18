@@ -4,7 +4,7 @@ import ast
 import pyperclip
 from pathlib import Path
 from collections import Counter
-
+import argparse
 
 PROMPT = """
 # EXECUTION MODE
@@ -118,7 +118,7 @@ def extract_function_defs_and_docstrings(file_content):
     return "\n".join(result)
 
 
-def build_tree_structure(base_path, patterns):
+def build_tree_structure(base_path, patterns, include_ignored=False):
     """Build a tree structure of the repository."""
     tree = {}
     base_path_name = Path(base_path).name  # Get the repository root name
@@ -129,8 +129,10 @@ def build_tree_structure(base_path, patterns):
         dirs[:] = [d for d in dirs if not d.startswith(".")]
         for file_name in files:
             file_path = Path(root) / file_name
-            # Ignore files starting with '.' and check .gitignore patterns
-            if file_name.startswith(".") or is_ignored(file_path, patterns):
+            # Check .gitignore patterns
+            if not include_ignored and (
+                file_name.startswith(".") or is_ignored(file_path, patterns)
+            ):
                 continue
             # Build the path in the tree
             relative_path = file_path.relative_to(base_path)
@@ -154,7 +156,7 @@ def format_tree(tree, indent=0):
     return lines
 
 
-def dump_repository_structure_and_files(base_path, no_nest):
+def dump_repository_structure_and_files(base_path, no_nest, include_ignored):
     """Dump the repository structure and file contents to an output string, and count tokens."""
     patterns = load_gitignore_patterns(base_path)
     main_gitignore_found = False
@@ -167,7 +169,7 @@ def dump_repository_structure_and_files(base_path, no_nest):
     output.append("\n")
 
     # Build the tree structure
-    tree = build_tree_structure(base_path, patterns)
+    tree = build_tree_structure(base_path, patterns, include_ignored)
     tree_lines = format_tree(tree)
     output.append("*Repository Structure:*\n")
     output.extend(tree_lines)
@@ -189,8 +191,10 @@ def dump_repository_structure_and_files(base_path, no_nest):
         for file_name in files:
             file_path = Path(root) / file_name
 
-            # Ignore files starting with '.' and check .gitignore patterns
-            if file_name.startswith(".") or is_ignored(file_path, patterns):
+            # Check .gitignore patterns
+            if not include_ignored and (
+                file_name.startswith(".") or is_ignored(file_path, patterns)
+            ):
                 continue
 
             # Check if the file is in a related repository
@@ -203,8 +207,10 @@ def dump_repository_structure_and_files(base_path, no_nest):
             if in_related_repo and file_path.suffix not in [".md", ".py"]:
                 continue
 
-            # Write the file path
-            output.append(f"File: {file_path}\n")
+            # Write the file path if the include_ignored flag is set
+            if include_ignored or not is_ignored(file_path, patterns):
+                output.append(f"File: {file_path}\n")
+
             # Write the file content
             try:
                 with open(file_path, "r") as file:
@@ -230,8 +236,6 @@ def dump_repository_structure_and_files(base_path, no_nest):
 
 
 def main():
-    import argparse
-
     parser = argparse.ArgumentParser(description="Generate repository context file.")
     parser.add_argument(
         "base_path",
@@ -249,12 +253,19 @@ def main():
         action="store_true",
         help="Ignore all related repo files when building the context",
     )
+    parser.add_argument(
+        "--ignored-filenames",
+        action="store_true",
+        help="Include ignored filenames in the output",
+    )
     args = parser.parse_args()
 
     base_path = Path(args.base_path).resolve()
     output_file = args.output_file or base_path / "context.txt"
 
-    context = dump_repository_structure_and_files(base_path, args.no_nest)
+    context = dump_repository_structure_and_files(
+        base_path, args.no_nest, args.ignored_filenames
+    )
 
     # Write to the output file
     with open(output_file, "w") as out_file:
