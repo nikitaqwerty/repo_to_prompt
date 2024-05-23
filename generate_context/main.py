@@ -159,7 +159,9 @@ def format_tree(tree, indent=0):
     return lines
 
 
-def dump_repository_structure_and_files(base_path, no_nest, include_ignored):
+def dump_repository_structure_and_files(
+    base_path, no_nest, include_ignored, filename=None
+):
     """Dump the repository structure and file contents to an output string, and count tokens."""
     patterns = load_gitignore_patterns(base_path)
     main_gitignore_found = False
@@ -170,59 +172,71 @@ def dump_repository_structure_and_files(base_path, no_nest, include_ignored):
     output.append(PROMPT)
     output.append("\n")
 
-    tree = build_tree_structure(base_path, patterns, include_ignored)
-    tree_lines = format_tree(tree)
-    output.append("*Repository Structure:*\n")
-    output.extend(tree_lines)
-    output.append("\n")
-    output.append("*Files content:*\n")
-
-    file_contents = {}
-
-    for root, dirs, files in os.walk(base_path):
-        dirs[:] = [d for d in dirs if not d.startswith(".")]
-
-        if main_gitignore_found and ".gitignore" in files:
-            related_repo_roots.append(root)
-
-        if not main_gitignore_found and ".gitignore" in files:
-            main_gitignore_found = True
-
-        for file_name in files:
-            file_path = Path(root) / file_name
-
-            if not include_ignored and (
-                file_name.startswith(".") or is_ignored(file_path, patterns)
-            ):
-                continue
-
-            in_related_repo = any(
-                file_path.is_relative_to(repo_root) for repo_root in related_repo_roots
-            )
-            if no_nest and in_related_repo:
-                continue
-
-            if in_related_repo and file_path.suffix not in [".md", ".py"]:
-                continue
-
-            try:
-                with open(file_path, "r") as file:
-                    content = file.read()
-                    if file_path.suffix == ".py" and in_related_repo:
-                        content = extract_function_defs_and_docstrings(content)
-                    elif file_path.suffix != ".py":
-                        lines = file.readlines()
-                        lines_to_write = lines[:500] if len(lines) > 500 else lines
-                        content = "".join(lines_to_write)
-                    file_contents[file_path] = content
-            except Exception as e:
-                file_contents[file_path] = f"Error reading {file_path}: {e}"
-
-    for file_path, content in file_contents.items():
-        output.append(f"File: {file_path}\n")
-        output.append(content)
-        total_tokens += count_tokens(content)
+    if filename:
+        file_path = Path(base_path) / filename
+        if not file_path.exists():
+            raise FileNotFoundError(f"Specified file '{filename}' does not exist.")
+        with open(file_path, "r") as file:
+            content = file.read()
+            output.append(f"File: {file_path}\n")
+            output.append(content)
+            total_tokens += count_tokens(content)
+            output.append("\n")
+    else:
+        tree = build_tree_structure(base_path, patterns, include_ignored)
+        tree_lines = format_tree(tree)
+        output.append("*Repository Structure:*\n")
+        output.extend(tree_lines)
         output.append("\n")
+        output.append("*Files content:*\n")
+
+        file_contents = {}
+
+        for root, dirs, files in os.walk(base_path):
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+
+            if main_gitignore_found and ".gitignore" in files:
+                related_repo_roots.append(root)
+
+            if not main_gitignore_found and ".gitignore" in files:
+                main_gitignore_found = True
+
+            for file_name in files:
+                file_path = Path(root) / file_name
+
+                if not include_ignored and (
+                    file_name.startswith(".") or is_ignored(file_path, patterns)
+                ):
+                    continue
+
+                in_related_repo = any(
+                    file_path.is_relative_to(repo_root)
+                    for repo_root in related_repo_roots
+                )
+                if no_nest and in_related_repo:
+                    continue
+
+                if in_related_repo and file_path.suffix not in [".md", ".py"]:
+                    continue
+
+                try:
+                    with open(file_path, "r") as file:
+                        content = file.read()
+                        if file_path.suffix == ".py" and in_related_repo:
+                            content = extract_function_defs_and_docstrings(content)
+                        elif file_path.suffix != ".py":
+                            lines = file.readlines()
+                            lines_to_write = lines[:500] if len(lines) > 500 else lines
+                            content = "".join(lines_to_write)
+                        file_contents[file_path] = content
+                except Exception as e:
+                    file_contents[file_path] = f"Error reading {file_path}: {e}"
+
+        for file_path, content in file_contents.items():
+            output.append(f"File: {file_path}\n")
+            output.append(content)
+            total_tokens += count_tokens(content)
+            output.append("\n")
 
     output.append("**Main task:**")
     print(f"Total tokens: {total_tokens}")
@@ -252,13 +266,16 @@ def main():
         action="store_true",
         help="Include ignored filenames in the output",
     )
+    parser.add_argument(
+        "--filename", help="Specify a single file to output with the prompt and content"
+    )
     args = parser.parse_args()
 
     base_path = Path(args.base_path).resolve()
     output_file = args.output_file or base_path / "context.txt"
 
     context = dump_repository_structure_and_files(
-        base_path, args.no_nest, args.ignored_filenames
+        base_path, args.no_nest, args.ignored_filenames, args.filename
     )
 
     with open(output_file, "w") as out_file:
