@@ -160,7 +160,7 @@ def format_tree(tree, indent=0):
 
 
 def dump_repository_structure_and_files(
-    base_path, no_nest, include_ignored, filename=None
+    base_path, no_nest, include_ignored, filenames=None
 ):
     """Dump the repository structure and file contents to an output string, and count tokens."""
     patterns = load_gitignore_patterns(base_path)
@@ -172,16 +172,17 @@ def dump_repository_structure_and_files(
     output.append(PROMPT)
     output.append("\n")
 
-    if filename:
-        file_path = Path(base_path) / filename
-        if not file_path.exists():
-            raise FileNotFoundError(f"Specified file '{filename}' does not exist.")
-        with open(file_path, "r") as file:
-            content = file.read()
-            output.append(f"File: {file_path}\n")
-            output.append(content)
-            total_tokens += count_tokens(content)
-            output.append("\n")
+    if filenames:
+        for filename in filenames:
+            file_path = Path(base_path) / filename
+            if not file_path.exists():
+                raise FileNotFoundError(f"Specified file '{filename}' does not exist.")
+            with open(file_path, "r") as file:
+                content = file.read()
+                output.append(f"File: {file_path}\n")
+                output.append(content)
+                total_tokens += count_tokens(content)
+                output.append("\n")
     else:
         tree = build_tree_structure(base_path, patterns, include_ignored)
         tree_lines = format_tree(tree)
@@ -267,7 +268,9 @@ def main():
         help="Include ignored filenames in the output",
     )
     parser.add_argument(
-        "--filename", help="Specify a single file to output with the prompt and content"
+        "--filename",
+        nargs="*",
+        help="Specify one or more files to output with the prompt and content",
     )
     args = parser.parse_args()
 
