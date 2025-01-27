@@ -3,7 +3,6 @@ import re
 import ast
 import pyperclip
 from pathlib import Path
-from collections import Counter
 import argparse
 import fnmatch
 
@@ -75,16 +74,50 @@ def get_function_signature(node):
 
 
 def extract_function_defs_and_docstrings(file_content):
-    """Extract function definitions and docstrings from Python file content."""
+    """Extract function/class definitions and docstrings from Python file content."""
     result = []
     try:
         tree = ast.parse(file_content)
-        for node in ast.walk(tree):
+
+        def process_node(node, indent=0):
             if isinstance(node, ast.FunctionDef):
-                result.append(get_function_signature(node))
-                if ast.get_docstring(node):
-                    docstring = ast.get_docstring(node)
-                    result.append(f'    """{docstring}"""')
+                # Function/method definition
+                result.append("    " * indent + get_function_signature(node))
+                if doc := ast.get_docstring(node):
+                    result.append("    " * (indent + 1) + f'"""{doc}"""')
+
+            elif isinstance(node, ast.ClassDef):
+                # Class definition
+                bases = [ast.unparse(base).strip() for base in node.bases]
+                base_str = f"({', '.join(bases)})" if bases else ""
+                result.append("    " * indent + f"class {node.name}{base_str}:")
+                if doc := ast.get_docstring(node):
+                    result.append("    " * (indent + 1) + f'"""{doc}"""')
+
+                # Process class body
+                for child in node.body:
+                    process_node(child, indent + 1)
+
+            elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                # Class-level assignments/annotations
+                if isinstance(node, ast.Assign):
+                    targets = [ast.unparse(t).strip() for t in node.targets]
+                    line = f"{', '.join(targets)} = ..."
+                else:  # AnnAssign
+                    target = ast.unparse(node.target).strip()
+                    annotation = (
+                        ast.unparse(node.annotation).strip() if node.annotation else ""
+                    )
+                    line = (
+                        f"{target}: {annotation} = ..."
+                        if node.value
+                        else f"{target}: {annotation}"
+                    )
+                result.append("    " * (indent + 1) + line)
+
+        for node in tree.body:
+            process_node(node)
+
     except SyntaxError as e:
         result.append(f"# SyntaxError while parsing: {e}")
     return "\n".join(result)
