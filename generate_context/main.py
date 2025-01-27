@@ -70,10 +70,7 @@ def count_tokens(text):
 
 def get_function_signature(node):
     """Get the function signature from an AST node."""
-    params = []
-    for arg in node.args.args:
-        if arg.arg != "self":
-            params.append(arg.arg)
+    params = [arg.arg for arg in node.args.args]
     return f"def {node.name}({', '.join(params)}):"
 
 
@@ -142,6 +139,9 @@ def dump_repository_structure_and_files(
         output.append("\n<files_content>")
         for filename in filenames:
             file_path = Path(base_path) / filename
+            resolved_path = file_path.resolve()
+            if not resolved_path.is_relative_to(base_path.resolve()):
+                raise ValueError(f"File {filename} is outside the base path.")
             if not file_path.exists():
                 raise FileNotFoundError(f"Specified file '{filename}' does not exist.")
             with open(file_path, "r") as file:
@@ -183,13 +183,17 @@ def dump_repository_structure_and_files(
 
                 try:
                     with open(file_path, "r") as file:
-                        content = file.read()
                         if file_path.suffix == ".py" and in_related_repo:
-                            content = extract_function_defs_and_docstrings(content)
+                            content = extract_function_defs_and_docstrings(file.read())
                         elif file_path.suffix != ".py":
-                            lines = file.readlines()
-                            lines_to_write = lines[:500] if len(lines) > 500 else lines
-                            content = "".join(lines_to_write)
+                            content = []
+                            for i, line in enumerate(file):
+                                if i >= 500:
+                                    break
+                                content.append(line)
+                            content = "".join(content)
+                        else:
+                            content = file.read()
                         file_contents[file_path] = content
                 except Exception as e:
                     file_contents[file_path] = f"Error reading {file_path}: {e}"
@@ -242,25 +246,33 @@ def main():
     args = parser.parse_args()
 
     base_path = Path(args.base_path).resolve()
-    output_file = args.output_file or base_path / "context.txt"
+
+    if args.output_file:
+        output_file = Path(args.output_file)
+        if not output_file.is_absolute():
+            output_file = base_path / output_file
+    else:
+        output_file = base_path / "context.txt"
 
     context = dump_repository_structure_and_files(
         base_path, args.no_nest, args.ignored_filenames, args.filename
     )
 
-    # Insert users_request into the context
+    # Safely insert users_request
+    safe_request = args.users_request.replace("</users_request>", "")
     context = context.replace(
         "<users_request>\n\n</users_request>",
-        f"<users_request>\n{args.users_request}\n</users_request>",
+        f"<users_request>\n{safe_request}\n</users_request>",
     )
 
     with open(output_file, "w") as out_file:
         out_file.write(context)
 
-    pyperclip.copy(context)
-    print(
-        f"Repository context has been dumped to {output_file} and copied to clipboard."
-    )
+    try:
+        pyperclip.copy(context)
+        print(f"Repository context copied to clipboard and saved to {output_file}")
+    except Exception as e:
+        print(f"Context saved to {output_file} (clipboard copy failed: {e})")
 
 
 if __name__ == "__main__":
