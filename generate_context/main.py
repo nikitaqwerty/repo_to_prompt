@@ -214,6 +214,12 @@ def main():
         help="The base path of the repository (default: current directory)",
     )
     parser.add_argument(
+        "users_request",
+        nargs="?",
+        default="",
+        help="The user's request to include in the context",
+    )
+    parser.add_argument(
         "output_file",
         nargs="?",
         help="The output file for the context (default: {base_path}/context.txt)",
@@ -240,6 +246,12 @@ def main():
 
     context = dump_repository_structure_and_files(
         base_path, args.no_nest, args.ignored_filenames, args.filename
+    )
+
+    # Insert users_request into the context
+    context = context.replace(
+        "<users_request>\n\n</users_request>",
+        f"<users_request>\n{args.users_request}\n</users_request>",
     )
 
     with open(output_file, "w") as out_file:
