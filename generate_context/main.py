@@ -7,8 +7,7 @@ from collections import Counter
 import argparse
 import fnmatch
 
-PROMPT = """
-<context>
+PROMPT = """<context>
 You are an expert programming AI assistant who prioritizes minimalist, efficient code. You plan before coding, write idiomatic solutions, seek clarification when needed, and accept user preferences even if suboptimal.
 </context>
 
@@ -26,8 +25,7 @@ You are an expert programming AI assistant who prioritizes minimalist, efficient
 - Keep responses brief but complete
 </format_rules>
 
-OUTPUT: Create responses following these rules. Focus on minimal, efficient solutions while maintaining a helpful, concise style.
-"""
+OUTPUT: Create responses following these rules. Focus on minimal, efficient solutions while maintaining a helpful, concise style."""
 
 
 def load_gitignore_patterns(base_path):
@@ -69,7 +67,7 @@ def get_function_signature(node):
     """Get the function signature from an AST node."""
     params = []
     for arg in node.args.args:
-        if arg.arg != "self":  # Ignore 'self' for methods
+        if arg.arg != "self":
             params.append(arg.arg)
     return f"def {node.name}({', '.join(params)}):"
 
@@ -128,34 +126,29 @@ def format_tree(tree, indent=0):
 def dump_repository_structure_and_files(
     base_path, no_nest, include_ignored, filenames=None
 ):
-    """Dump the repository structure and file contents to an output string, and count tokens."""
+    """Dump the repository structure and file contents with HTML-style blocks."""
     patterns = load_gitignore_patterns(base_path)
     main_gitignore_found = False
     related_repo_roots = []
     total_tokens = 0
-    output = []
-
-    output.append(PROMPT)
-    output.append("\n")
+    output = [PROMPT]
 
     if filenames:
+        output.append("\n<files_content>")
         for filename in filenames:
             file_path = Path(base_path) / filename
             if not file_path.exists():
                 raise FileNotFoundError(f"Specified file '{filename}' does not exist.")
             with open(file_path, "r") as file:
                 content = file.read()
-                output.append(f"File: {file_path}\n")
-                output.append(content)
+                output.append(f"\nFile: {file_path}\n{content}")
                 total_tokens += count_tokens(content)
-                output.append("\n")
+        output.append("\n</files_content>")
     else:
         tree = build_tree_structure(base_path, patterns, include_ignored)
-        tree_lines = format_tree(tree)
-        output.append("*Repository Structure:*\n")
-        output.extend(tree_lines)
-        output.append("\n")
-        output.append("*Files content:*\n")
+        output.append("\n<repository_structure>")
+        output.extend(format_tree(tree))
+        output.append("\n</repository_structure>\n\n<files_content>")
 
         file_contents = {}
 
@@ -200,12 +193,12 @@ def dump_repository_structure_and_files(
                     file_contents[file_path] = f"Error reading {file_path}: {e}"
 
         for file_path, content in file_contents.items():
-            output.append(f"File: {file_path}\n")
-            output.append(content)
+            output.append(f"\nFile: {file_path}\n{content}")
             total_tokens += count_tokens(content)
-            output.append("\n")
 
-    output.append("**Main task:**")
+        output.append("\n</files_content>")
+
+    output.append("\n<main_task>\nMain task:\n</main_task>")
     print(f"Total tokens: {total_tokens}")
     return "\n".join(output)
 
