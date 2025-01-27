@@ -200,7 +200,7 @@ def dump_repository_structure_and_files(
 
         output.append("\n</files_content>")
 
-    output.append("\n<users_request>\\n</users_request>")
+    output.append("\n<users_request>\n\n</users_request>")
     print(f"Total tokens: {total_tokens}")
     return "\n".join(output)
 
