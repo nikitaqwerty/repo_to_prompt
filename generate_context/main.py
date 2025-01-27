@@ -45,15 +45,20 @@ def load_gitignore_patterns(base_path):
 
 def is_ignored(path, patterns):
     """Check if the path matches any of the .gitignore patterns."""
-    path = str(path)
+    path_obj = Path(path)
     for gitignore_path, patterns_list in patterns.items():
-        pattern_dir = os.path.dirname(gitignore_path)
+        gitignore_dir = Path(gitignore_path).parent
+        try:
+            relative_path = path_obj.relative_to(gitignore_dir)
+        except ValueError:
+            continue
+
         for pattern in patterns_list:
-            glob_pattern = os.path.join(pattern_dir, pattern)
-            if glob_pattern.endswith(os.sep):
-                glob_pattern = glob_pattern.rstrip(os.sep) + "/**"
-            if fnmatch.fnmatch(path, glob_pattern):
+            if fnmatch.fnmatch(str(relative_path), pattern):
                 return True
+            if pattern.endswith("/"):
+                if fnmatch.fnmatch(str(relative_path), pattern + "*"):
+                    return True
     return False
 
 
@@ -174,9 +179,6 @@ def dump_repository_structure_and_files(
                     for repo_root in related_repo_roots
                 )
                 if no_nest and in_related_repo:
-                    continue
-
-                if in_related_repo and file_path.suffix not in [".md", ".py"]:
                     continue
 
                 try:
