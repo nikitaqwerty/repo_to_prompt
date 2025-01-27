@@ -90,7 +90,7 @@ def extract_function_defs_and_docstrings(file_content):
     return "\n".join(result)
 
 
-def build_tree_structure(base_path, patterns, include_ignored=False):
+def build_tree_structure(base_path, patterns, include_ignored, ignore_files):
     """Build a tree structure of the repository."""
     tree = {}
     base_path_name = Path(base_path).name
@@ -100,9 +100,11 @@ def build_tree_structure(base_path, patterns, include_ignored=False):
         dirs[:] = [d for d in dirs if not d.startswith(".")]
         for file_name in files:
             file_path = Path(root) / file_name
-            if not include_ignored and (
-                file_name.startswith(".") or is_ignored(file_path, patterns)
-            ):
+            skip_conditions = (
+                not include_ignored
+                and (file_name.startswith(".") or is_ignored(file_path, patterns))
+            ) or file_name in ignore_files
+            if skip_conditions:
                 continue
             relative_path = file_path.relative_to(base_path)
             parts = [base_path_name] + list(relative_path.parts)
@@ -126,7 +128,7 @@ def format_tree(tree, indent=0):
 
 
 def dump_repository_structure_and_files(
-    base_path, no_nest, include_ignored, filenames=None
+    base_path, no_nest, include_ignored, filenames=None, ignore_files=None
 ):
     """Dump the repository structure and file contents with HTML-style blocks."""
     patterns = load_gitignore_patterns(base_path)
@@ -134,6 +136,7 @@ def dump_repository_structure_and_files(
     related_repo_roots = []
     total_tokens = 0
     output = [PROMPT]
+    ignore_files = ignore_files or []
 
     if filenames:
         output.append("\n<files_content>")
@@ -150,7 +153,7 @@ def dump_repository_structure_and_files(
                 total_tokens += count_tokens(content)
         output.append("\n</files_content>")
     else:
-        tree = build_tree_structure(base_path, patterns, include_ignored)
+        tree = build_tree_structure(base_path, patterns, include_ignored, ignore_files)
         output.append("\n<repository_structure>")
         output.extend(format_tree(tree))
         output.append("\n</repository_structure>\n\n<files_content>")
@@ -168,10 +171,11 @@ def dump_repository_structure_and_files(
 
             for file_name in files:
                 file_path = Path(root) / file_name
-
-                if not include_ignored and (
-                    file_name.startswith(".") or is_ignored(file_path, patterns)
-                ):
+                skip_conditions = (
+                    not include_ignored
+                    and (file_name.startswith(".") or is_ignored(file_path, patterns))
+                ) or file_name in ignore_files
+                if skip_conditions:
                     continue
 
                 in_related_repo = any(
@@ -243,6 +247,12 @@ def main():
         nargs="*",
         help="Specify one or more files to output with the prompt and content",
     )
+    parser.add_argument(
+        "--ignore-file",
+        nargs="*",
+        default=[],
+        help="Explicitly ignore files by name",
+    )
     args = parser.parse_args()
 
     base_path = Path(args.base_path).resolve()
@@ -255,7 +265,7 @@ def main():
         output_file = base_path / "context.txt"
 
     context = dump_repository_structure_and_files(
-        base_path, args.no_nest, args.ignored_filenames, args.filename
+        base_path, args.no_nest, args.ignored_filenames, args.filename, args.ignore_file
     )
 
     # Safely insert users_request
