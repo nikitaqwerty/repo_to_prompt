@@ -152,7 +152,12 @@ def format_tree(tree, indent=0):
 
 
 def dump_repository_structure_and_files(
-    base_path, no_nest, include_ignored, filenames=None, ignore_files=None
+    base_path,
+    no_nest,
+    include_ignored,
+    filenames=None,
+    ignore_files=None,
+    include_tree=True,
 ):
     """Dump the repository structure and file contents with HTML-style blocks."""
     patterns = load_gitignore_patterns(base_path)
@@ -162,11 +167,14 @@ def dump_repository_structure_and_files(
     output = [PROMPT]
     ignore_files = ignore_files or []
 
-    # Always build and add repository structure
-    tree = build_tree_structure(base_path, patterns, include_ignored, ignore_files)
-    output.append("\n<repository_structure>")
-    output.extend(format_tree(tree))
-    output.append("\n</repository_structure>\n\n<files_content>")
+    if include_tree:
+        # Build and add repository structure
+        tree = build_tree_structure(base_path, patterns, include_ignored, ignore_files)
+        output.append("\n<repository_structure>")
+        output.extend(format_tree(tree))
+        output.append("\n</repository_structure>\n\n<files_content>")
+    else:
+        output.append("\n<files_content>")
 
     if filenames:
         for filename in filenames:
@@ -276,6 +284,11 @@ def main():
         default=[],
         help="Explicitly ignore files by name",
     )
+    parser.add_argument(
+        "--no-tree",
+        action="store_true",
+        help="Omit repository structure from the output",
+    )
     args = parser.parse_args()
 
     base_path = Path(args.base_path).resolve()
@@ -288,7 +301,12 @@ def main():
         output_file = base_path / "context.txt"
 
     context = dump_repository_structure_and_files(
-        base_path, args.no_nest, args.ignored_filenames, args.filename, args.ignore_file
+        base_path,
+        args.no_nest,
+        args.ignored_filenames,
+        args.filename,
+        args.ignore_file,
+        include_tree=not args.no_tree,
     )
 
     # Safely insert users_request
