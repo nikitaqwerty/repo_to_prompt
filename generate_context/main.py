@@ -7,24 +7,15 @@ import argparse
 import fnmatch
 
 PROMPT = """<context>
-You are an expert programming AI assistant who prioritizes minimalist, efficient code. You plan before coding, write idiomatic solutions, seek clarification when needed, and accept user preferences even if suboptimal.
+You are an expert programming AI assistant who prioritizes minimalist, efficient code. You plan before coding, write idiomatic solutions, and accept user preferences even if suboptimal.
 </context>
 
-<planning_rules>
-- Create 3-step numbered plans before coding
-- Display current plan step clearly
-- Ask for clarification on ambiguity
-- Optimize for minimal code and overhead
-</planning_rules>
-
 <format_rules>
-- Use code blocks for simple tasks
-- Create artifacts for file-level tasks
 - Keep responses brief but complete
-- You only output full code file, never cut output
+- You only output full code file, you never cut output
 </format_rules>
 
-OUTPUT: Create responses following these rules. Focus on minimal, efficient solutions while maintaining a helpful, concise style."""
+<input>"""
 
 
 def load_gitignore_patterns(base_path):
@@ -171,8 +162,13 @@ def dump_repository_structure_and_files(
     output = [PROMPT]
     ignore_files = ignore_files or []
 
+    # Always build and add repository structure
+    tree = build_tree_structure(base_path, patterns, include_ignored, ignore_files)
+    output.append("\n<repository_structure>")
+    output.extend(format_tree(tree))
+    output.append("\n</repository_structure>\n\n<files_content>")
+
     if filenames:
-        output.append("\n<files_content>")
         for filename in filenames:
             file_path = Path(base_path) / filename
             resolved_path = file_path.resolve()
@@ -184,13 +180,7 @@ def dump_repository_structure_and_files(
                 content = file.read()
                 output.append(f"\nFile: {file_path}\n{content}")
                 total_tokens += count_tokens(content)
-        output.append("\n</files_content>")
     else:
-        tree = build_tree_structure(base_path, patterns, include_ignored, ignore_files)
-        output.append("\n<repository_structure>")
-        output.extend(format_tree(tree))
-        output.append("\n</repository_structure>\n\n<files_content>")
-
         file_contents = {}
 
         for root, dirs, files in os.walk(base_path):
@@ -239,9 +229,9 @@ def dump_repository_structure_and_files(
             output.append(f"\nFile: {file_path}\n{content}")
             total_tokens += count_tokens(content)
 
-        output.append("\n</files_content>")
-
-    output.append("\n<users_request>\n\n</users_request>")
+    output.append("\n</files_content>")
+    output.append("\n</input>")
+    output.append("\n<task>\n\n</task>")
     print(f"Total tokens: {total_tokens}")
     return "\n".join(output)
 
@@ -302,10 +292,10 @@ def main():
     )
 
     # Safely insert users_request
-    safe_request = args.users_request.replace("</users_request>", "")
+    safe_request = args.users_request.replace("</task>", "")
     context = context.replace(
-        "<users_request>\n\n</users_request>",
-        f"<users_request>\n{safe_request}\n</users_request>",
+        "<task>\n\n</task>",
+        f"<task>\n{safe_request}\n</task>",
     )
 
     with open(output_file, "w") as out_file:
