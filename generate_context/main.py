@@ -1,6 +1,7 @@
 import os
 import re
 import ast
+import json
 import pyperclip
 from pathlib import Path
 import argparse
@@ -114,6 +115,33 @@ def extract_function_defs_and_docstrings(file_content):
     return "\n".join(result)
 
 
+def extract_notebook_cell_inputs(file_content):
+    """Extract only input cells from a Jupyter notebook file."""
+    try:
+        notebook = json.loads(file_content)
+        cells = notebook.get('cells', [])
+        
+        extracted_content = []
+        for i, cell in enumerate(cells):
+            cell_type = cell.get('cell_type', '')
+            source = cell.get('source', [])
+            
+            # Convert source to string if it's a list
+            if isinstance(source, list):
+                source = ''.join(source)
+            
+            if cell_type and source:
+                extracted_content.append(f"# Cell {i+1} ({cell_type})")
+                extracted_content.append(source)
+                extracted_content.append("")  # Add an empty line for readability
+        
+        return "\n".join(extracted_content)
+    except json.JSONDecodeError:
+        return "Error: Could not parse notebook file as JSON"
+    except Exception as e:
+        return f"Error processing notebook: {e}"
+
+
 def build_tree_structure(base_path, patterns, include_ignored, ignore_files):
     """Build a tree structure of the repository."""
     tree = {}
@@ -186,6 +214,8 @@ def dump_repository_structure_and_files(
                 raise FileNotFoundError(f"Specified file '{filename}' does not exist.")
             with open(file_path, "r") as file:
                 content = file.read()
+                if file_path.suffix == '.ipynb':
+                    content = extract_notebook_cell_inputs(content)
                 output.append(f"\nFile: {file_path}\n{content}")
                 total_tokens += count_tokens(content)
     else:
@@ -218,7 +248,9 @@ def dump_repository_structure_and_files(
 
                 try:
                     with open(file_path, "r") as file:
-                        if file_path.suffix == ".py" and in_related_repo:
+                        if file_path.suffix == '.ipynb':
+                            content = extract_notebook_cell_inputs(file.read())
+                        elif file_path.suffix == ".py" and in_related_repo:
                             content = extract_function_defs_and_docstrings(file.read())
                         elif file_path.suffix != ".py":
                             content = []
