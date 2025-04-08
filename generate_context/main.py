@@ -179,6 +179,37 @@ def format_tree(tree, indent=0):
     return lines
 
 
+def process_file(file_path, base_path, related_repo_roots, no_nest, total_tokens, output):
+    """Process a single file and add its content to the output."""
+    try:
+        with open(file_path, "r") as file:
+            in_related_repo = any(
+                file_path.is_relative_to(repo_root)
+                for repo_root in related_repo_roots
+            )
+            
+            if file_path.suffix == '.ipynb':
+                content = extract_notebook_cell_inputs(file.read())
+            elif file_path.suffix == ".py" and in_related_repo and no_nest:
+                content = extract_function_defs_and_docstrings(file.read())
+            elif file_path.suffix != ".py":
+                content = []
+                for i, line in enumerate(file):
+                    if i >= 500:
+                        break
+                    content.append(line)
+                content = "".join(content)
+            else:
+                content = file.read()
+            
+            output.append(f"\nFile: {file_path}\n{content}")
+            total_tokens += count_tokens(content)
+            return total_tokens
+    except Exception as e:
+        output.append(f"\nFile: {file_path}\nError reading {file_path}: {e}")
+        return total_tokens
+
+
 def dump_repository_structure_and_files(
     base_path,
     no_nest,
@@ -186,6 +217,7 @@ def dump_repository_structure_and_files(
     filenames=None,
     ignore_files=None,
     include_tree=True,
+    folders=None,
 ):
     """Dump the repository structure and file contents with HTML-style blocks."""
     patterns = load_gitignore_patterns(base_path)
@@ -194,6 +226,7 @@ def dump_repository_structure_and_files(
     total_tokens = 0
     output = [PROMPT]
     ignore_files = ignore_files or []
+    processed_files = set()  # Keep track of processed files to avoid duplicates
 
     if include_tree:
         # Build and add repository structure
@@ -204,6 +237,7 @@ def dump_repository_structure_and_files(
     else:
         output.append("\n<files_content>")
 
+    # Process specific filenames
     if filenames:
         for filename in filenames:
             file_path = Path(base_path) / filename
@@ -212,13 +246,46 @@ def dump_repository_structure_and_files(
                 raise ValueError(f"File {filename} is outside the base path.")
             if not file_path.exists():
                 raise FileNotFoundError(f"Specified file '{filename}' does not exist.")
+            
             with open(file_path, "r") as file:
                 content = file.read()
                 if file_path.suffix == '.ipynb':
                     content = extract_notebook_cell_inputs(content)
                 output.append(f"\nFile: {file_path}\n{content}")
                 total_tokens += count_tokens(content)
-    else:
+                processed_files.add(str(file_path))
+
+    # Process specific folders
+    if folders:
+        for folder in folders:
+            folder_path = Path(base_path) / folder
+            resolved_folder_path = folder_path.resolve()
+            if not resolved_folder_path.is_relative_to(base_path.resolve()):
+                raise ValueError(f"Folder {folder} is outside the base path.")
+            if not folder_path.exists():
+                raise FileNotFoundError(f"Specified folder '{folder}' does not exist.")
+            if not folder_path.is_dir():
+                raise NotADirectoryError(f"Specified path '{folder}' is not a directory.")
+            
+            # Find all files in the folder
+            for file_path in folder_path.glob('**/*'):
+                if file_path.is_file():
+                    # Skip if already processed or should be ignored
+                    if (str(file_path) in processed_files or 
+                        not include_ignored and (file_path.name.startswith(".") or is_ignored(file_path, patterns)) or 
+                        file_path.name in ignore_files):
+                        continue
+                    
+                    with open(file_path, "r") as file:
+                        content = file.read()
+                        if file_path.suffix == '.ipynb':
+                            content = extract_notebook_cell_inputs(content)
+                        output.append(f"\nFile: {file_path}\n{content}")
+                        total_tokens += count_tokens(content)
+                        processed_files.add(str(file_path))
+
+    # Process all files in the repository if no specific files or folders are provided
+    if not filenames and not folders:
         file_contents = {}
 
         for root, dirs, files in os.walk(base_path):
@@ -235,7 +302,7 @@ def dump_repository_structure_and_files(
                 skip_conditions = (
                     not include_ignored
                     and (file_name.startswith(".") or is_ignored(file_path, patterns))
-                ) or file_name in ignore_files
+                ) or file_name in ignore_files or str(file_path) in processed_files
                 if skip_conditions:
                     continue
 
@@ -262,8 +329,10 @@ def dump_repository_structure_and_files(
                         else:
                             content = file.read()
                         file_contents[file_path] = content
+                        processed_files.add(str(file_path))
                 except Exception as e:
                     file_contents[file_path] = f"Error reading {file_path}: {e}"
+                    processed_files.add(str(file_path))
 
         for file_path, content in file_contents.items():
             output.append(f"\nFile: {file_path}\n{content}")
@@ -311,6 +380,11 @@ def main():
         help="Specify one or more files to output with the prompt and content",
     )
     parser.add_argument(
+        "--folder",
+        nargs="*",
+        help="Specify one or more folders to include all files from",
+    )
+    parser.add_argument(
         "--ignore-file",
         nargs="*",
         default=[],
@@ -339,6 +413,7 @@ def main():
         args.filename,
         args.ignore_file,
         include_tree=not args.no_tree,
+        folders=args.folder,
     )
 
     # Safely insert users_request
